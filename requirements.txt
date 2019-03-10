@@ -1,6 +1,1 @@
-opencv-python
-numpy
-scikit-learn
-tqdm
-tensor
-tensorflow-gpu
+tensorflow
