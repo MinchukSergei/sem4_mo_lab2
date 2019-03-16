@@ -1,24 +1,29 @@
 import numpy as np
 import tensorflow as tf
-from lab1 import small_data, split_data, get_unique_data, encode_classes, generate_one_hot_encoded_class
+from lab1 import small_data, split_data, get_unique_data, encode_classes, generate_one_hot_encoded_class, data_shuffle
 
 img_w = 28
 img_h = 28
 img_size = img_h * img_w
 img_classes = 10
 
-epochs = 100
+epochs = 70
 batch_size = 100
 display_freq = 70
-learning_rate = 0.001
+learning_rate = 0.005
+# units = [u for u in range(2500, 0, -500)]
+units = [300 for u in range(2)]
+# units = [300, 500, 250, 125, 63]
 
-number_of_layers = 3
-number_of_units = 300
-
-rnd_seed = 42
+rnd_seed = None
 l2_beta = 0.01
 
-dropout = 0.15
+dropout_rate = 0.15
+
+decay_rate = 0.95
+
+use_dropout = True
+use_regularization = True
 
 
 def main():
@@ -27,7 +32,7 @@ def main():
     images, labels = get_unique_data(small_data)
     labels = encode_classes(labels, one_hot_encoded_labels)
 
-    tr_x, tr_y, te_x, te_y, v_x, v_y = split_data(images, labels, 0.7, 0.15, 0.15, rnd_seed)
+    tr_x, tr_y, te_x, te_y, v_x, v_y = split_data(images, labels, 0.8, 0.1, 0.1, rnd_seed)
     tr_x = tr_x.reshape(tr_x.shape[0], -1)
     te_x = te_x.reshape(te_x.shape[0], -1)
     v_x = v_x.reshape(v_x.shape[0], -1)
@@ -35,40 +40,67 @@ def main():
     x = tf.placeholder(tf.float32, shape=[None, img_size], name='X')
     y = tf.placeholder(tf.float32, shape=[None, img_classes], name='Y')
 
-    init, class_prediction, loss_function, optimizer, accuracy = init_nn(x, y, number_of_layers)
+    init, loss_function, optimizer, accuracy = init_nn(x, y, len(tr_x))
     sess = train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, rnd_seed)
     test_nn(x, y, te_x, te_y, sess, loss_function, accuracy)
     pass
 
 
-def init_nn(x, y, hidden_layouts):
-    regularizers = []
+def init_nn(x, y, train_size):
+    output_logits = init_layers(x)
 
-    fc_layer_in, W_IN = full_connected_layer(x, number_of_units, 'IN', True)
-    regularizers.append(W_IN)
+    loss_function = init_loss(y, output_logits)
 
-    last_layout = fc_layer_in
-    for hl in range(hidden_layouts):
-        last_layout, W = full_connected_layer(last_layout, number_of_units, f'full_connected_{hl}', True)
-        regularizers.append(W)
-
-    output_logits, W_OUT = full_connected_layer(last_layout, img_classes, 'OUT', False)
-    regularizers.append(W_OUT)
-    regularizers = np.array(regularizers)
-
-    class_prediction = tf.argmax(output_logits, axis=1, name='predictions')
-    loss_function = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=output_logits),
-                                   name='loss_function')
-    v_func = np.vectorize(lambda a: tf.nn.l2_loss(a))
-    # loss_function = tf.reduce_mean(loss_function + l2_beta * np.sum(v_func(regularizers), axis=0))
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(loss_function)
+    global_step = tf.Variable(0, trainable=False)
+    learn_rate = tf.train.exponential_decay(
+        learning_rate,
+        global_step,
+        train_size,
+        decay_rate,
+        staircase=True
+    )
+    optimizer = tf.train.GradientDescentOptimizer(
+        learning_rate=learn_rate
+    ).minimize(
+        loss=loss_function,
+        global_step=global_step
+    )
     # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, name='Adam-Optimizer').minimize(loss_function)
 
     correct_prediction = tf.equal(tf.argmax(output_logits, 1), tf.argmax(y, 1), name='correct_prediction')
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
     init = tf.global_variables_initializer()
 
-    return init, class_prediction, loss_function, optimizer, accuracy
+    return init, loss_function, optimizer, accuracy
+
+
+def init_layers(x):
+    last_layout = x
+    for hl in range(len(units)):
+        last_layout = full_connected_layer(last_layout, units[hl], f'HFCL{hl}', drop_out=use_dropout)
+
+    return full_connected_layer(last_layout, img_classes, 'OFCL', drop_out=False)
+
+
+def init_loss(y, logits):
+    loss_function = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=logits), name='loss_function'
+    )
+
+    if use_regularization:
+        regularizers = []
+
+        for i in range(len(units)):
+            regularizers.append(tf.nn.l2_loss(get_tensor_by_name(f'W_HFCL{i}')))
+        regularizers.append(tf.nn.l2_loss(get_tensor_by_name('W_OFCL')))
+
+        loss_function = tf.reduce_mean(loss_function + l2_beta * np.sum(regularizers, axis=0))
+
+    return loss_function
+
+
+def get_tensor_by_name(name):
+    return tf.get_default_graph().get_tensor_by_name(f'{name}:0')
 
 
 def train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, rnd_seed):
@@ -144,31 +176,20 @@ def bias_variable(name, shape):
                            initializer=initial)
 
 
-def full_connected_layer(x, num_units, name, use_relu=True):
+def full_connected_layer(x, num_units, name, drop_out):
     in_dim = x.get_shape()[1]
 
     W = weight_variable(name, shape=[in_dim, num_units])
     b = bias_variable(name, [num_units])
 
-    layer = tf.matmul(x, W)
-    layer += b
+    layer = tf.matmul(x, W) + b
 
-    if use_relu:
-        layer = tf.nn.relu(layer)
-        # layer = tf.nn.dropout(layer, rate=dropout)
+    layer = tf.nn.relu(layer)
 
-    return layer, W
+    if drop_out:
+        layer = tf.nn.dropout(layer, rate=dropout_rate)
 
-
-def data_shuffle(x, y, seed):
-    if seed is not None:
-        np.random.seed(seed)
-
-    permutation = np.random.permutation(y.shape[0])
-    x_shuffled = x[permutation, :]
-    y_shuffled = y[permutation, :]
-
-    return x_shuffled, y_shuffled
+    return layer
 
 
 def get_next_batch(x, y, start, end):
