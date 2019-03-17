@@ -2,37 +2,47 @@ import numpy as np
 import tensorflow as tf
 from lab1 import small_data, split_data, get_unique_data, encode_classes, generate_one_hot_encoded_class, data_shuffle
 
+RND_SEED = 42
+
+# Img props
 img_w = 28
 img_h = 28
 img_size = img_h * img_w
 img_classes = 10
 
+# Learning hyper params
 epochs = 70
 batch_size = 100
 display_freq = 70
-learning_rate = 0.005
-# units = [u for u in range(2500, 0, -500)]
+learning_rate = 0.001
 units = [300 for u in range(2)]
+# units = [u for u in range(2500, 0, -500)]
 # units = [300, 500, 250, 125, 63]
 
-rnd_seed = None
+# L2 Regularization
+use_regularization = True
 l2_beta = 0.01
 
+# Dropout
+use_dropout = True
 dropout_rate = 0.15
 
+# Adaptive lr
+use_adaptive_lr = True
+start_learning_rate = 0.005
 decay_rate = 0.95
-
-use_dropout = True
-use_regularization = True
 
 
 def main():
+    tf.random.set_random_seed(RND_SEED)
+    np.random.seed(RND_SEED)
+
     one_hot_encoded_labels = generate_one_hot_encoded_class()
 
     images, labels = get_unique_data(small_data)
     labels = encode_classes(labels, one_hot_encoded_labels)
 
-    tr_x, tr_y, te_x, te_y, v_x, v_y = split_data(images, labels, 0.8, 0.1, 0.1, rnd_seed)
+    tr_x, tr_y, te_x, te_y, v_x, v_y = split_data(images, labels, 0.8, 0.1, 0.1)
     tr_x = tr_x.reshape(tr_x.shape[0], -1)
     te_x = te_x.reshape(te_x.shape[0], -1)
     v_x = v_x.reshape(v_x.shape[0], -1)
@@ -41,9 +51,10 @@ def main():
     y = tf.placeholder(tf.float32, shape=[None, img_classes], name='Y')
 
     init, loss_function, optimizer, accuracy = init_nn(x, y, len(tr_x))
-    sess = train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, rnd_seed)
+
+    sess = train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y)
+
     test_nn(x, y, te_x, te_y, sess, loss_function, accuracy)
-    pass
 
 
 def init_nn(x, y, train_size):
@@ -51,14 +62,8 @@ def init_nn(x, y, train_size):
 
     loss_function = init_loss(y, output_logits)
 
-    global_step = tf.Variable(0, trainable=False)
-    learn_rate = tf.train.exponential_decay(
-        learning_rate,
-        global_step,
-        train_size,
-        decay_rate,
-        staircase=True
-    )
+    learn_rate, global_step = init_learning_rate(train_size)
+
     optimizer = tf.train.GradientDescentOptimizer(
         learning_rate=learn_rate
     ).minimize(
@@ -72,6 +77,24 @@ def init_nn(x, y, train_size):
     init = tf.global_variables_initializer()
 
     return init, loss_function, optimizer, accuracy
+
+
+def init_learning_rate(train_size):
+    global_step = None
+    learn_rate = learning_rate
+
+    if use_adaptive_lr:
+        global_step = tf.Variable(0, trainable=False)
+
+        learn_rate = tf.train.exponential_decay(
+            start_learning_rate,
+            global_step,
+            train_size,
+            decay_rate,
+            staircase=True
+        )
+
+    return learn_rate, global_step
 
 
 def init_layers(x):
@@ -103,7 +126,7 @@ def get_tensor_by_name(name):
     return tf.get_default_graph().get_tensor_by_name(f'{name}:0')
 
 
-def train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, rnd_seed):
+def train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y):
     sess = tf.InteractiveSession()
     sess.run(init)
     global_step = 0
@@ -112,7 +135,7 @@ def train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, 
     for epoch in range(epochs):
         print('Training epoch: {}'.format(epoch + 1))
 
-        tr_x, tr_y = data_shuffle(tr_x, tr_y, rnd_seed)
+        tr_x, tr_y = data_shuffle(tr_x, tr_y)
 
         for iteration in range(num_tr_iter):
             global_step += 1
@@ -140,7 +163,7 @@ def train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y, 
         loss_valid, acc_valid = sess.run([loss_function, accuracy], feed_dict=feed_dict_valid)
 
         print('---------------------------------------------------------')
-        print("Epoch: {0}, VALIDATION Loss: {1:.2f}, Accuracy: {2:.01%}".format(epoch + 1, loss_valid, acc_valid))
+        print("Epoch: {0}:\t VALID Loss={1:.2f},\t Accuracy={2:.01%}".format(epoch + 1, loss_valid, acc_valid))
         print('---------------------------------------------------------')
 
     return sess
