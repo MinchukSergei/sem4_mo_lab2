@@ -2,6 +2,8 @@ import numpy as np
 import tensorflow as tf
 from lab1 import small_data, split_data, get_unique_data, encode_classes, generate_one_hot_encoded_class, data_shuffle
 
+from lab2.grid_search import GridSearch
+
 RND_SEED = 42
 
 # Img props
@@ -11,7 +13,7 @@ img_size = img_h * img_w
 img_classes = 10
 
 # Learning hyper params
-epochs = 70
+epochs = 50
 batch_size = 100
 display_freq = 70
 learning_rate = 0.001
@@ -37,15 +39,7 @@ def main():
     tf.random.set_random_seed(RND_SEED)
     np.random.seed(RND_SEED)
 
-    one_hot_encoded_labels = generate_one_hot_encoded_class()
-
-    images, labels = get_unique_data(small_data)
-    labels = encode_classes(labels, one_hot_encoded_labels)
-
-    tr_x, tr_y, te_x, te_y, v_x, v_y = split_data(images, labels, 0.8, 0.1, 0.1)
-    tr_x = tr_x.reshape(tr_x.shape[0], -1)
-    te_x = te_x.reshape(te_x.shape[0], -1)
-    v_x = v_x.reshape(v_x.shape[0], -1)
+    tr_x, tr_y, v_x, v_y, te_x, te_y = prepare_data(small_data)
 
     x = tf.placeholder(tf.float32, shape=[None, img_size], name='X')
     y = tf.placeholder(tf.float32, shape=[None, img_classes], name='Y')
@@ -55,6 +49,20 @@ def main():
     sess = train(init, x, y, optimizer, loss_function, accuracy, tr_x, tr_y, v_x, v_y)
 
     test_nn(x, y, te_x, te_y, sess, loss_function, accuracy)
+
+
+def prepare_data(path_to_data):
+    one_hot_encoded_labels = generate_one_hot_encoded_class()
+
+    images, labels = get_unique_data(path_to_data)
+    labels = encode_classes(labels, one_hot_encoded_labels)
+
+    tr_x, tr_y, v_x, v_y, te_x, te_y = split_data(images, labels, 0.8, 0.1, 0.1)
+    tr_x = tr_x.reshape(tr_x.shape[0], -1)
+    v_x = v_x.reshape(v_x.shape[0], -1)
+    te_x = te_x.reshape(te_x.shape[0], -1)
+
+    return tr_x, tr_y, v_x, v_y, te_x, te_y
 
 
 def init_nn(x, y, train_size):
