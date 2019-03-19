@@ -5,7 +5,8 @@ import time
 
 
 class GridSearch:
-    def __init__(self, hp, fit, metric, rnd_count=None):
+    def __init__(self, nn, hp, fit, metric, rnd_count=None):
+        self.nn = nn
         self.hp = hp
         self.models = []
         self.fit = fit
@@ -36,7 +37,7 @@ class GridSearch:
 
         for m in tqdm(models):
             start_time = time.perf_counter()
-            result = self.fit(m)
+            result = self.fit(self.nn, m)
             elapsed_time = time.perf_counter() - start_time
 
             self.results.append({
