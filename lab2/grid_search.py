@@ -18,7 +18,8 @@ class GridSearch:
     def cartesian_product_hp(self):
         hp_names = self.hp.keys()
 
-        for hp in itertools.product(*self.hp.values()):
+        print('Model computing:')
+        for hp in tqdm(itertools.product(*self.hp.values())):
             model = {}
 
             for n, hp_v in zip(hp_names, hp):
@@ -27,10 +28,10 @@ class GridSearch:
             self.models.append(model)
 
     def execute(self):
-        models = self.models
+        models = self.models.copy()
 
         if self.rnd_count is not None:
-            models = shuffle(models)
+            shuffle(models)
             models = models[:self.rnd_count]
 
         for m in tqdm(models):
@@ -47,5 +48,5 @@ class GridSearch:
     def get_total_time(self):
         return sum(list(map(lambda t: t['time'], self.results)))
 
-    def get_best_result(self, desc=True):
-        return sorted(list(map(lambda t: t[self.metric], self.results)), reverse=desc)
+    def get_results(self, desc=True):
+        return sorted(self.results, reverse=desc, key=lambda a: a['result'][self.metric])
