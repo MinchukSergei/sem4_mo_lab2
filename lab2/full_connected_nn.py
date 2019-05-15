@@ -1,10 +1,12 @@
 import tensorflow as tf
 from lab1 import data_shuffle
+import cv2
+import numpy as np
 
-DISPLAY_FREQUENCY = 10
+DISPLAY_FREQUENCY = 300
 
 tensor_board_path = 'D:/Programming/bsuir/sem4/MO/lab2/tensorboard'
-
+failed_prediction_path = 'D:/Programming/bsuir/sem4/MO/lab2/failed_predictions/'
 
 class FullConnectedNN:
     def __init__(self, data, in_size, out_size, epochs):
@@ -20,13 +22,13 @@ class FullConnectedNN:
         self.y = tf.placeholder(tf.float32, shape=[None, self.out_size], name='OUT')
         self.drop_rate = tf.placeholder(tf.float32)
 
-        layer1 = full_connected_layer(self.x, 300, 'HFC1')
-        layer2 = full_connected_layer(layer1, 300, 'HFC2')
-        layer3 = full_connected_layer(layer2, 300, 'HFC3')
+        layer1 = full_connected_layer(self.x, 300, 'HFC1', self.drop_rate)
+        layer2 = full_connected_layer(layer1, 300, 'HFC2', self.drop_rate)
+        layer3 = full_connected_layer(layer2, 300, 'HFC3', self.drop_rate)
 
-        self.logits = full_connected_layer(layer3, self.out_size, 'OFC1', output=True)
+        self.logits = full_connected_layer(layer3, self.out_size, 'OFC1', self.drop_rate * 0, output=True)
 
-        l2_reg = 0
+        l2_reg = 0.002
         loss1 = tf.nn.l2_loss(get_tensor_by_name('W_HFC1')) * l2_reg
         loss2 = tf.nn.l2_loss(get_tensor_by_name('W_HFC2')) * l2_reg
         loss3 = tf.nn.l2_loss(get_tensor_by_name('W_HFC3')) * l2_reg
@@ -37,7 +39,7 @@ class FullConnectedNN:
         self.loss = loss + regularizer
 
         self.global_step = tf.Variable(0, trainable=False)
-        learn_rate = tf.train.exponential_decay(0.05, self.global_step, len(self.data[0][0]), 1, staircase=True)
+        learn_rate = tf.train.exponential_decay(0.01, self.global_step, len(self.data[0][0]), 0.95)
 
         self.optimizer = tf.train.GradientDescentOptimizer(
             learning_rate=learn_rate
@@ -46,6 +48,7 @@ class FullConnectedNN:
             global_step=self.global_step
         )
 
+        self.prediction = tf.argmax(self.logits, 1)
         self.correct_prediction = tf.equal(tf.argmax(self.logits, 1), tf.argmax(self.y, 1))
         self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
 
@@ -88,7 +91,7 @@ class FullConnectedNN:
                 feed_dict_batch = {
                     self.x: x_batch,
                     self.y: y_batch,
-                    self.drop_rate: 0
+                    self.drop_rate: 0.3
                 }
 
                 _, summary = self.session.run([self.optimizer, self.merged], feed_dict=feed_dict_batch)
@@ -147,14 +150,22 @@ class FullConnectedNN:
             }
 
             acc = self.session.run([self.accuracy], feed_dict=feed_dict_batch)
-            acc_valid += acc
+            acc_valid += acc[0]
+
+            # predictions, labels, images = self.session.run([self.prediction, self.y, self.x], feed_dict=feed_dict_batch)
+
+            # for idx, (p, l, i) in enumerate(zip(predictions, labels, images)):
+            #     if not np.equal(p, np.argmax(l)):
+            #         i = i.reshape((28, 28))
+            #         i = i * 255
+            #         cv2.imwrite(f'{failed_prediction_path}/{idx}{chr(np.argmax(l) + 65)}.png', i)
 
         print('---------------------------------------------------------')
         print("TEST Accuracy={0:.01%}".format(acc_valid / num_test_iter))
         print('---------------------------------------------------------')
 
 
-def full_connected_layer(x, num_units, name, output=False, dropout=0):
+def full_connected_layer(x, num_units, name, dropout=0, output=False):
     in_dim = x.get_shape()[1]
 
     W = weight_variable(name, shape=[in_dim, num_units])
@@ -175,7 +186,7 @@ def get_tensor_by_name(name):
 
 
 def weight_variable(name, shape):
-    initial = tf.truncated_normal_initializer(stddev=0.01)
+    initial = tf.truncated_normal_initializer(stddev=0.1)
 
     return tf.get_variable('W_' + name,
                            dtype=tf.float32,
